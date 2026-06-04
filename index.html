@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>car game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #111;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #debug-ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #00ff00;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            pointer-events: none;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .controls-hint {
+            color: #aaa;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="debug-ui">
+        <strong>car</strong><br>
+        -----------------------------------<br>
+        speed: <span id="ui-speed">0.0</span> km/h<br>
+        drift/Slip: <span id="ui-slip">0.0</span><br>
+        g-force (Lat): <span id="ui-gforce">0.0</span>G<br>
+        <div class="controls-hint">
+            controls: W/S or UP/DOWN (Gas/Brake)<br>
+            A/D or LEFT/RIGHT (Steering)
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        // GAME CONFIG & PHYSICS CONSTANTS 
+        const PHYSICS = {
+            accelPower: 35.0,      // Engine power pushing forward
+            maxReverseSpeed: -15.0,
+            dragLinear: 0.15,      // Standard friction
+            dragQuadratic: 0.005,  // Wind resistance (increases quadratically with speed)
+            brakePower: 60.0,      // Stopping force
+            gripThreshhold: 12.0,  // Speed at which drifting starts becoming noticeable
+            driftGrip: 4.5,        // How tightly tires grip laterally (lower = slippier)
+            steerSpeed: 2.2,       // Steering sensitivity
+            weightTransfer: 0.04   // Visual suspension leaning effect
+        };
+
+        // --- SETUP SYSTEM ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+        scene.fog = new THREE.FogExp2(0x1a1a1a, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        const clock = new THREE.Clock();
+
+        // --- LIGHTING (Placeholder Prototype Style) ---
+        const ambientLight = new THREE.AmbientLight(0x555555);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(100, 200, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 150;
+        dirLight.shadow.camera.bottom = -150;
+        dirLight.shadow.camera.left = -150;
+        dirLight.shadow.camera.right = 150;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // --- DEVELOPMENT GRID & TRACK ---
+        // Base world grid
+        const gridHelper = new THREE.GridHelper(1000, 200, 0x444444, 0x222222);
+        gridHelper.position.y = 0.01;
+        scene.add(gridHelper);
+
+        // Track generation (Early prototype block layout)
+        const trackMaterial = new THREE.MeshPhongMaterial({ color: 0x282828, flatShading: true });
+        const wallMaterial = new THREE.MeshPhongMaterial({ color: 0xff5500, wireframe: false }); // "Dev Orange"
+
+        // Create a simple winding race track layout out of flat blocks
+        const trackWaypoints = [
+            { x: 0, z: 0, w: 40, l: 150 },
+            { x: 30, z: 100, w: 100, l: 40 },
+            { x: 100, z: 140, w: 40, l: 120 },
+            { x: 170, z: 200, w: 180, l: 40 },
+            { x: 280, z: 120, w: 40, l: 200 },
+            { x: 220, z: 0, w: 160, l: 40 },
+            { x: 120, z: -60, w: 40, l: 160 },
+            { x: 30, z: -120, w: 220, l: 40 },
+            { x: -100, z: -80, w: 40, l: 120 },
+            { x: -70, z: -10, w: 100, l: 40 },
+            { x: -30, z: 30, w: 40, l: 60 }
+        ];
+
+        trackWaypoints.forEach(wp => {
+            // Road surface
+            const roadGeo = new THREE.BoxGeometry(wp.w, 0.2, wp.l);
+            const road = new THREE.Mesh(roadGeo, trackMaterial);
+            road.position.set(wp.x, -0.1, wp.z);
+            road.receiveShadow = true;
+            scene.add(road);
+
+            // Add simple indicator blocks (dev cones placeholder) along track edges
+            const edgeIndicatorGeo = new THREE.BoxGeometry(1, 2, 1);
+            
+            // Left edge helper
+            if(wp.w > wp.l) {
+                for(let i = -wp.w/2; i <= wp.w/2; i += 20) {
+                    const blockL = new THREE.Mesh(edgeIndicatorGeo, wallMaterial);
+                    blockL.position.set(wp.x + i, 1, wp.z - wp.l/2);
+                    scene.add(blockL);
+                    const blockR = new THREE.Mesh(edgeIndicatorGeo, wallMaterial);
+                    blockR.position.set(wp.x + i, 1, wp.z + wp.l/2);
+                    scene.add(blockR);
+                }
+            } else {
+                for(let i = -wp.l/2; i <= wp.l/2; i += 20) {
+                    const blockL = new THREE.Mesh(edgeIndicatorGeo, wallMaterial);
+                    blockL.position.set(wp.x - wp.w/2, 1, wp.z + i);
+                    scene.add(blockL);
+                    const blockR = new THREE.Mesh(edgeIndicatorGeo, wallMaterial);
+                    blockR.position.set(wp.x + wp.w/2, 1, wp.z + i);
+                    scene.add(blockR);
+                }
+            }
+        });
+
+
+        // --- THE PLAYER (Grey Prototype Cube) ---
+        // Root container manages actual physics position/rotation
+        const carRoot = new THREE.Group();
+        carRoot.position.set(0, 0, -40);
+        scene.add(carRoot);
+
+        // Visual mesh inside root tilts independently to simulate weight distribution
+        const carMeshGeo = new THREE.BoxGeometry(2.4, 1.5, 4.5);
+        const carMaterial = new THREE.MeshPhongMaterial({ color: 0x888888, flatShading: true });
+        const carMesh = new THREE.Mesh(carMeshGeo, carMaterial);
+        carMesh.position.y = 0.75; // Sit on ground
+        carMesh.castShadow = true;
+        carRoot.add(carMesh);
+
+        // Simple front nose indicator so you know which way the cube faces
+        const noseGeo = new THREE.BoxGeometry(2.0, 0.4, 0.8);
+        const noseMat = new THREE.MeshPhongMaterial({ color: 0x444444 });
+        const nose = new THREE.Mesh(noseGeo, noseMat);
+        nose.position.set(0, 0.2, 2.3);
+        carMesh.add(nose);
+
+
+        // --- PHYSICS STATE ---
+        const state = {
+            velocity: new THREE.Vector3(0, 0, 0), // World-space velocity vector
+            heading: 0,                           // Facing angle in radians
+            steerInput: 0,
+            throttleInput: 0,
+            isBraking: false
+        };
+
+
+        // --- INPUT HANDLING ---
+        const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+        window.addEventListener('keydown', (e) => { if (e.key in keys) keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { if (e.key in keys) keys[e.key] = false; });
+
+        function processInputs() {
+            // Throttle / Reverse
+            if (keys.w || keys.ArrowUp) {
+                state.throttleInput = 1.0;
+            } else if (keys.s || keys.ArrowDown) {
+                state.throttleInput = -0.5;
+            } else {
+                state.throttleInput = 0.0;
+            }
+
+            // Steering
+            if (keys.a || keys.ArrowLeft) {
+                state.steerInput = 1.0;
+            } else if (keys.d || keys.ArrowRight) {
+                state.steerInput = -1.0;
+            } else {
+                state.steerInput = 0.0;
+            }
+        }
+
+
+        // --- MAIN LOOP & PHYSICS ENGINE ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = Math.min(clock.getDelta(), 0.1); // Cap dt to handle lag spikes safely
+            processInputs();
+
+            // 1. Heading vectors
+            const forwardVec = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading)).normalize();
+            const rightVec = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading)).normalize();
+
+            // 2. Break current velocity into local Forward & Lateral components
+            const forwardVelLength = state.velocity.dot(forwardVec);
+            const lateralVelLength = state.velocity.dot(rightVec);
+
+            // 3. Handle Steering (Lower capability at stationary or maximum speeds)
+            const speedRatio = Math.abs(forwardVelLength) / 40.0; 
+            const steerFactor = Math.min(1.0, speedRatio * 3.0) * (1.0 - speedRatio * 0.3); // Dynamic steering arc
+            const turnDirection = forwardVelLength >= 0 ? 1 : -1; // Reverse steering flip
+            state.heading += state.steerInput * PHYSICS.steerSpeed * steerFactor * turnDirection * dt;
+
+            // Update Root rotation based on steering calculation
+            carRoot.rotation.y = state.heading;
+
+            // 4. Forces Engine (Acceleration & Braking)
+            let forwardForce = 0;
+
+            if (state.throttleInput > 0) {
+                // Accelerating forward
+                forwardForce += state.throttleInput * PHYSICS.accelPower;
+            } else if (state.throttleInput < 0) {
+                if (forwardVelLength > 0.5) {
+                    // Moving forward but pressing backward = Braking
+                    forwardForce -= PHYSICS.brakePower;
+                } else {
+                    // Stationary or already rolling backward = Reverse Engine
+                    forwardForce += state.throttleInput * Math.abs(PHYSICS.accelPower * 0.5);
+                }
+            }
+
+            // Apply forward force to local forward speed
+            let newForwardVelLength = forwardVelLength + forwardForce * dt;
+
+            // Cap reverse speed
+            if(newForwardVelLength < PHYSICS.maxReverseSpeed) newForwardVelLength = PHYSICS.maxReverseSpeed;
+
+            // 5. Drag Forces (Air resistance & Friction)
+            const totalSpeed = Math.abs(newForwardVelLength);
+            const dragFriction = (newForwardVelLength * PHYSICS.dragLinear) + (newForwardVelLength * totalSpeed * PHYSICS.dragQuadratic);
+            newForwardVelLength -= dragFriction * dt;
+
+            // 6. Grip & Lateral Drift Mechanics
+            // Tires resist sliding sideways. This simulates that friction curve.
+            let newLateralVelLength = lateralVelLength;
+            const slipFactor = Math.abs(lateralVelLength);
+            
+            // Apply drift lateral dampening
+            newLateralVelLength -= lateralVelLength * PHYSICS.driftGrip * dt;
+
+            // 7. Reassemble World Velocity from modified local components
+            state.velocity.copy(forwardVec).multiplyScalar(newForwardVelLength);
+            state.velocity.addScaledVector(rightVec, newLateralVelLength);
+
+            // 8. Apply translation to position
+            carRoot.position.addScaledVector(state.velocity, dt);
+
+            // 9. JUICE: Visual Suspension Weight Transfer (Roll & Pitch)
+            // Calculate pseudo G-Forces based on lateral slide and engine inputs
+            const targetRoll = -newLateralVelLength * PHYSICS.weightTransfer;
+            const targetPitch = (forwardForce * PHYSICS.weightTransfer * 0.2) - (dragFriction * PHYSICS.weightTransfer * 0.05);
+
+            // Interpolate mesh rotation inside root for a rubbery weight feel
+            carMesh.rotation.z += (targetRoll - carMesh.rotation.z) * 10 * dt;
+            carMesh.rotation.x += (targetPitch - carMesh.rotation.x) * 10 * dt;
+
+
+            // --- CHASE CAMERA LOGIC ---
+            // Define camera anchor point behind and above the car based on heading
+            const camOffset = new THREE.Vector3()
+                .copy(forwardVec)
+                .multiplyScalar(-14) // Distance behind
+                .add(new THREE.Vector3(0, 6, 0)); // Height
+
+            const targetCamPos = carRoot.position.clone().add(camOffset);
+            
+            // Smoothly lerp camera position to eliminate rigid pinning
+            camera.position.lerp(targetCamPos, 8 * dt);
+            
+            // Aim camera slightly ahead of the car model
+            const lookTarget = carRoot.position.clone().add(forwardVec.clone().multiplyScalar(4));
+            camera.lookAt(lookTarget);
+
+
+            // --- DIAGNOSTICS UI UPDATE ---
+            const displayedSpeed = Math.abs(newForwardVelLength) * 3.6; // Convert units to arbitrary 'km/h'
+            document.getElementById('ui-speed').innerText = displayedSpeed.toFixed(1);
+            document.getElementById('ui-slip').innerText = slipFactor.toFixed(2);
+            document.getElementById('ui-gforce').innerText = (Math.abs(newLateralVelLength * 0.1)).toFixed(2);
+
+            renderer.render(scene, camera);
+        }
+
+        // --- WINDOW RESIZE ENGINE ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Fire loop
+        animate();
+    </script>
+</body>
+</html>
