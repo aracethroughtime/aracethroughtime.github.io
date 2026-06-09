@@ -3,328 +3,1075 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>car game</title>
+    <title>Canadian Pacific — Rocky Mountain to Prairie Run</title>
     <style>
-        body {
-            margin: 0;
-            padding: 0;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #0a0e1a; font-family: Georgia, 'Times New Roman', serif; }
+
+        #hud { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; }
+
+        /* ── Title card ────────────────────────────────────── */
+        #panel-title {
+            position: absolute; top: 18px; left: 20px; color: #d4a853;
+        }
+        #panel-title h1 {
+            font-size: 14px; font-weight: normal; letter-spacing: 3.5px;
+            text-transform: uppercase; text-shadow: 0 1px 12px rgba(0,0,0,0.95);
+        }
+        #panel-title p {
+            font-size: 9.5px; opacity: 0.5; margin-top: 3px; letter-spacing: 1.5px;
+        }
+        #controls-hint {
+            margin-top: 12px; font-size: 10px; color: #b89a60;
+            line-height: 2.0; opacity: 0.7;
+        }
+
+        /* ── Zone badge ───────────────────────────────────── */
+        #zone-badge {
+            position: absolute; top: 18px; right: 18px;
+            background: rgba(8, 5, 2, 0.82);
+            border: 1px solid #7a5c14;
+            border-radius: 3px; padding: 9px 14px; text-align: right;
+        }
+        #zone-badge .lbl {
+            font-size: 8px; letter-spacing: 2px; color: #8a6a28;
+            text-transform: uppercase; margin-bottom: 5px;
+        }
+        #zone-badge .name { font-size: 13px; color: #f5d060; letter-spacing: 0.5px; }
+
+        /* ── Brass dashboard ──────────────────────────────── */
+        #dashboard {
+            position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
+            display: flex; align-items: stretch;
+            background: radial-gradient(ellipse at 50% 25%, #3d2808 0%, #0d0904 100%);
+            border: 2px solid #7a5c14;
+            border-radius: 8px;
+            box-shadow: 0 0 50px rgba(200,155,25,0.2), inset 0 0 40px rgba(0,0,0,0.7);
             overflow: hidden;
-            background-color: #111;
-            font-family: 'Courier New', Courier, monospace;
         }
-        #canvas-container {
-            width: 100vw;
-            height: 100vh;
+        .gauge { padding: 11px 24px; text-align: center; color: #c49838; }
+        .gauge-lbl {
+            font-size: 8.5px; letter-spacing: 2.5px; text-transform: uppercase;
+            opacity: 0.6; margin-bottom: 5px;
         }
-        #debug-ui {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: #00ff00;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border: 1px solid #333;
-            border-radius: 4px;
-            pointer-events: none;
-            font-size: 14px;
-            line-height: 1.5;
+        .gauge-val {
+            font-size: 27px; font-weight: bold; color: #f5d060;
+            text-shadow: 0 0 15px rgba(245,208,60,0.4); letter-spacing: 1px;
+            min-width: 60px; display: inline-block;
         }
-        .controls-hint {
-            color: #aaa;
-            margin-top: 10px;
-            font-size: 12px;
+        .gauge-unit { font-size: 7.5px; opacity: 0.45; margin-top: 3px; letter-spacing: 1.5px; }
+        .divider {
+            width: 1px;
+            background: linear-gradient(to bottom, transparent 8%, #7a5c14 35%, #7a5c14 65%, transparent 92%);
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-    <div id="debug-ui">
-        <strong>car</strong><br>
-        -----------------------------------<br>
-        speed: <span id="ui-speed">0.0</span> km/h<br>
-        drift/Slip: <span id="ui-slip">0.0</span><br>
-        g-force (Lat): <span id="ui-gforce">0.0</span>G<br>
-        <div class="controls-hint">
-            controls: W/S or UP/DOWN (Gas/Brake)<br>
-            A/D or LEFT/RIGHT (Steering)
+<div id="hud">
+    <div id="panel-title">
+        <h1>Canadian Pacific</h1>
+        <p>Rocky Mountain → Prairie Run</p>
+        <div id="controls-hint">
+            W / ↑ &nbsp;·&nbsp; Accelerate<br>
+            S / ↓ &nbsp;·&nbsp; Brake · Reverse<br>
+            A / ← &nbsp;·&nbsp; Steer Left<br>
+            D / → &nbsp;·&nbsp; Steer Right
         </div>
     </div>
 
-    <div id="canvas-container"></div>
+    <div id="zone-badge">
+        <div class="lbl">Current Zone</div>
+        <div class="name" id="zone-name">Rocky Mountains</div>
+    </div>
 
-    <script>
-        // GAME CONFIG & PHYSICS CONSTANTS 
-        const PHYSICS = {
-            accelPower: 35.0,      // Engine power pushing forward
-            maxReverseSpeed: -15.0,
-            dragLinear: 0.15,      // Standard friction
-            dragQuadratic: 0.005,  // Wind resistance (increases quadratically with speed)
-            brakePower: 60.0,      // Stopping force
-            gripThreshhold: 12.0,  // Speed at which drifting starts becoming noticeable
-            driftGrip: 4.5,        // How tightly tires grip laterally (lower = slippier)
-            steerSpeed: 2.2,       // Steering sensitivity
-            weightTransfer: 0.04   // Visual suspension leaning effect
-        };
+    <div id="dashboard">
+        <div class="gauge">
+            <div class="gauge-lbl">Speed</div>
+            <div class="gauge-val"><span id="ui-speed">0</span></div>
+            <div class="gauge-unit">KM / H</div>
+        </div>
+        <div class="divider"></div>
+        <div class="gauge">
+            <div class="gauge-lbl">Lateral G</div>
+            <div class="gauge-val"><span id="ui-gforce">0.00</span></div>
+            <div class="gauge-unit">G-FORCE</div>
+        </div>
+        <div class="divider"></div>
+        <div class="gauge">
+            <div class="gauge-lbl">Slip</div>
+            <div class="gauge-val"><span id="ui-slip">0.00</span></div>
+            <div class="gauge-unit">DRIFT</div>
+        </div>
+    </div>
+</div>
 
-        // --- SETUP SYSTEM ---
-        const container = document.getElementById('canvas-container');
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a1a);
-        scene.fog = new THREE.FogExp2(0x1a1a1a, 0.015);
+<script>
+'use strict';
+// ════════════════════════════════════════════════════════════════════
+//  🚂  CANADIAN PACIFIC RAILWAY — Rocky Mountain to Prairie Run
+//      Three.js r128  ·  Enhanced Graphics Overhaul
+//
+//  Zones (z-axis):  0 → 300  Rocky Mountains
+//                 300 → 620  Pine Forest
+//                 620 → 1100  Open Prairie
+// ════════════════════════════════════════════════════════════════════
 
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        container.appendChild(renderer.domElement);
+// ── Physics config (same tuning as original) ─────────────────────
+const PHYSICS = {
+    accelPower:      35.0,
+    maxReverseSpeed: -15.0,
+    dragLinear:      0.15,
+    dragQuadratic:   0.005,
+    brakePower:      60.0,
+    driftGrip:       4.5,
+    steerSpeed:      2.2,
+    weightTransfer:  0.04
+};
 
-        const clock = new THREE.Clock();
+// ── Renderer ──────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+renderer.toneMapping       = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
 
-        // --- LIGHTING (Placeholder Prototype Style) ---
-        const ambientLight = new THREE.AmbientLight(0x555555);
-        scene.add(ambientLight);
+const clock = new THREE.Clock();
 
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(100, 200, 50);
-        dirLight.castShadow = true;
-        dirLight.shadow.camera.top = 150;
-        dirLight.shadow.camera.bottom = -150;
-        dirLight.shadow.camera.left = -150;
-        dirLight.shadow.camera.right = 150;
-        dirLight.shadow.mapSize.width = 1024;
-        dirLight.shadow.mapSize.height = 1024;
-        scene.add(dirLight);
+// ── Scene ─────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.fog   = new THREE.FogExp2(0x8aafc4, 0.0032);
 
-        // --- DEVELOPMENT GRID & TRACK ---
-        // Base world grid
-        const gridHelper = new THREE.GridHelper(1000, 200, 0x444444, 0x222222);
-        gridHelper.position.y = 0.01;
-        scene.add(gridHelper);
+// ── Camera ────────────────────────────────────────────────────────
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2000);
 
-        // Track generation (Early prototype block layout)
-        const trackMaterial = new THREE.MeshPhongMaterial({ color: 0x282828, flatShading: true });
-        const wallMaterial = new THREE.MeshPhongMaterial({ color: 0xff5500, wireframe: false }); // "Dev Orange"
+// ════════════════════════════════════════════════════════════════════
+//  LIGHTING
+// ════════════════════════════════════════════════════════════════════
 
-        // Create a simple winding race track layout out of flat blocks
-        const trackWaypoints = [
-            { x: 0, z: 0, w: 40, l: 150 },
-            { x: 30, z: 100, w: 100, l: 40 },
-            { x: 100, z: 140, w: 40, l: 120 },
-            { x: 170, z: 200, w: 180, l: 40 },
-            { x: 280, z: 120, w: 40, l: 200 },
-            { x: 220, z: 0, w: 160, l: 40 },
-            { x: 120, z: -60, w: 40, l: 160 },
-            { x: 30, z: -120, w: 220, l: 40 },
-            { x: -100, z: -80, w: 40, l: 120 },
-            { x: -70, z: -10, w: 100, l: 40 },
-            { x: -30, z: 30, w: 40, l: 60 }
-        ];
+// Hemisphere — sky (blue) to earth (warm brown)
+const hemiLight = new THREE.HemisphereLight(0x88c0df, 0x70501e, 0.9);
+scene.add(hemiLight);
 
-        trackWaypoints.forEach(wp => {
-            // Road surface
-            const roadGeo = new THREE.BoxGeometry(wp.w, 0.2, wp.l);
-            const road = new THREE.Mesh(roadGeo, trackMaterial);
-            road.position.set(wp.x, -0.1, wp.z);
-            road.receiveShadow = true;
-            scene.add(road);
+// Main sun — warm amber, comes from south-west (prairie direction)
+const sunLight = new THREE.DirectionalLight(0xffce88, 1.6);
+sunLight.position.set(-110, 240, 580);
+sunLight.castShadow              = true;
+sunLight.shadow.camera.top       =  220;
+sunLight.shadow.camera.bottom    = -220;
+sunLight.shadow.camera.left      = -220;
+sunLight.shadow.camera.right     =  220;
+sunLight.shadow.camera.far       = 1400;
+sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.bias             = -0.0004;
+scene.add(sunLight);
 
-            // Add simple indicator blocks (dev cones placeholder) along track edges
-            const edgeIndicatorGeo = new THREE.BoxGeometry(1, 2, 1);
-            
-            // Left edge helper
-            if(wp.w > wp.l) {
-                for(let i = -wp.w/2; i <= wp.w/2; i += 20) {
-                    const blockL = new THREE.Mesh(edgeIndicatorGeo, wallMaterial);
-                    blockL.position.set(wp.x + i, 1, wp.z - wp.l/2);
-                    scene.add(blockL);
-                    const blockR = new THREE.Mesh(edgeIndicatorGeo, wallMaterial);
-                    blockR.position.set(wp.x + i, 1, wp.z + wp.l/2);
-                    scene.add(blockR);
-                }
-            } else {
-                for(let i = -wp.l/2; i <= wp.l/2; i += 20) {
-                    const blockL = new THREE.Mesh(edgeIndicatorGeo, wallMaterial);
-                    blockL.position.set(wp.x - wp.w/2, 1, wp.z + i);
-                    scene.add(blockL);
-                    const blockR = new THREE.Mesh(edgeIndicatorGeo, wallMaterial);
-                    blockR.position.set(wp.x + wp.w/2, 1, wp.z + i);
-                    scene.add(blockR);
-                }
-            }
-        });
+// Cool blue fill from the mountain side
+const fillLight = new THREE.DirectionalLight(0x4878c8, 0.45);
+fillLight.position.set(120, 80, -180);
+scene.add(fillLight);
 
+// ════════════════════════════════════════════════════════════════════
+//  SKY DOME  — vertex-coloured gradient sphere
+//  Mountain side (+z world = backward = blue/cool)
+//  Prairie side  (-z world = forward  = orange/warm)
+//  Sky dome is big (r=1500) and renders with BackSide so you see inside it.
+// ════════════════════════════════════════════════════════════════════
 
-        // --- THE PLAYER (Grey Prototype Cube) ---
-        // Root container manages actual physics position/rotation
-        const carRoot = new THREE.Group();
-        carRoot.position.set(0, 0, -40);
-        scene.add(carRoot);
+(function buildSky() {
+    const geo  = new THREE.SphereGeometry(1500, 32, 22);
+    const pos  = geo.attributes.position;
+    const cols = new Float32Array(pos.count * 3);
 
-        // Visual mesh inside root tilts independently to simulate weight distribution
-        const carMeshGeo = new THREE.BoxGeometry(2.4, 1.5, 4.5);
-        const carMaterial = new THREE.MeshPhongMaterial({ color: 0x888888, flatShading: true });
-        const carMesh = new THREE.Mesh(carMeshGeo, carMaterial);
-        carMesh.position.y = 0.75; // Sit on ground
-        carMesh.castShadow = true;
-        carRoot.add(carMesh);
+    // Key colours
+    const zenith   = new THREE.Color(0x071520);  // Deep midnight blue (top)
+    const skyMid   = new THREE.Color(0x1c62a8);  // Rich mid sky
+    const mtnH     = new THREE.Color(0x90c8e8);  // Pale blue horizon (mountain side)
+    const prH      = new THREE.Color(0xff8830);  // Warm amber horizon  (prairie side)
+    const prLow    = new THREE.Color(0xc04510);  // Deep sunset at base
 
-        // Simple front nose indicator so you know which way the cube faces
-        const noseGeo = new THREE.BoxGeometry(2.0, 0.4, 0.8);
-        const noseMat = new THREE.MeshPhongMaterial({ color: 0x444444 });
-        const nose = new THREE.Mesh(noseGeo, noseMat);
-        nose.position.set(0, 0.2, 2.3);
-        carMesh.add(nose);
+    const tmp = new THREE.Color();
 
+    for (let i = 0; i < pos.count; i++) {
+        const ny = pos.getY(i) / 1500;   // −1 south pole → +1 north pole
+        const nz = pos.getZ(i) / 1500;   // +1 mountain side, −1 prairie side
 
-        // --- PHYSICS STATE ---
-        const state = {
-            velocity: new THREE.Vector3(0, 0, 0), // World-space velocity vector
-            heading: 0,                           // Facing angle in radians
-            steerInput: 0,
-            throttleInput: 0,
-            isBraking: false
-        };
+        const el  = (ny + 1) * 0.5;                // 0 equator, 1 top
+        const pw  = (-nz + 1) * 0.5;               // 0 mountain, 1 prairie
 
-
-        // --- INPUT HANDLING ---
-        const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
-
-        window.addEventListener('keydown', (e) => { if (e.key in keys) keys[e.key] = true; });
-        window.addEventListener('keyup', (e) => { if (e.key in keys) keys[e.key] = false; });
-
-        function processInputs() {
-            // Throttle / Reverse
-            if (keys.w || keys.ArrowUp) {
-                state.throttleInput = 1.0;
-            } else if (keys.s || keys.ArrowDown) {
-                state.throttleInput = -0.5;
-            } else {
-                state.throttleInput = 0.0;
-            }
-
-            // Steering
-            if (keys.a || keys.ArrowLeft) {
-                state.steerInput = 1.0;
-            } else if (keys.d || keys.ArrowRight) {
-                state.steerInput = -1.0;
-            } else {
-                state.steerInput = 0.0;
-            }
+        if (el >= 0.55) {
+            const t = (el - 0.55) / 0.45;
+            tmp.copy(skyMid).lerp(zenith, Math.pow(t, 0.65));
+        } else {
+            const t = el / 0.55;                    // 0 at horizon band, 1 at mid-sky
+            const horizCol = new THREE.Color().copy(mtnH).lerp(prH, pw);
+            const deepCol  = new THREE.Color().copy(prLow).lerp(mtnH, 1.0 - pw * 0.7);
+            const bandCol  = deepCol.clone().lerp(horizCol, Math.min(1, t * 2.5));
+            tmp.copy(bandCol).lerp(skyMid, t * 0.72);
         }
 
+        cols[i * 3]     = tmp.r;
+        cols[i * 3 + 1] = tmp.g;
+        cols[i * 3 + 2] = tmp.b;
+    }
 
-        // --- MAIN LOOP & PHYSICS ENGINE ---
-        function animate() {
-            requestAnimationFrame(animate);
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    scene.add(new THREE.Mesh(geo,
+        new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false })
+    ));
+})();
 
-            const dt = Math.min(clock.getDelta(), 0.1); // Cap dt to handle lag spikes safely
-            processInputs();
+// ════════════════════════════════════════════════════════════════════
+//  TERRAIN — height-mapped PlaneGeometry with per-vertex colours
+//
+//  Terrain spans:  x: −350 → +350,  z: −160 → +1260  (centred at z=550)
+//  Zone mapping:   zt = clamp(z / 1100, 0, 1)
+//    zt 0.00–0.27  Rocky Mountains  — steep cliff walls beside road
+//    zt 0.27–0.56  Pine Forest       — gentle rolling hills on sides
+//    zt 0.56–1.00  Open Prairie      — flat golden grassland
+//
+//  The road corridor (|x| < 18-20) is always flat (y=0)
+// ════════════════════════════════════════════════════════════════════
 
-            // 1. Heading vectors
-            const forwardVec = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading)).normalize();
-            const rightVec = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading)).normalize();
+function terrainHeight(x, z) {
+    const zt = Math.max(0, Math.min(1, z / 1100));
+    const ax = Math.abs(x);
 
-            // 2. Break current velocity into local Forward & Lateral components
-            const forwardVelLength = state.velocity.dot(forwardVec);
-            const lateralVelLength = state.velocity.dot(rightVec);
+    if (zt < 0.27) {
+        const mz = 1.0 - zt / 0.27;
+        if (ax < 19) return 0;
+        const d  = ax - 19;
+        const h  = mz * 90 * Math.pow(d / 310.0, 0.52);
+        const nz = Math.sin(x * 0.19 + z * 0.13) * 5 * mz;
+        return Math.max(0, h + nz);
 
-            // 3. Handle Steering (Lower capability at stationary or maximum speeds)
-            const speedRatio = Math.abs(forwardVelLength) / 40.0; 
-            const steerFactor = Math.min(1.0, speedRatio * 3.0) * (1.0 - speedRatio * 0.3); // Dynamic steering arc
-            const turnDirection = forwardVelLength >= 0 ? 1 : -1; // Reverse steering flip
-            state.heading += state.steerInput * PHYSICS.steerSpeed * steerFactor * turnDirection * dt;
+    } else if (zt < 0.56) {
+        const fz = (zt - 0.27) / 0.29;
+        if (ax < 17) return 0;
+        const d = ax - 17;
+        const h = (1 - fz) * 24 * Math.pow(d / 220.0, 0.50)
+                + Math.sin(x * 0.11 + z * 0.07) * 2.5 * (1 - fz);
+        return Math.max(0, h);
 
-            // Update Root rotation based on steering calculation
-            carRoot.rotation.y = state.heading;
+    } else {
+        return 0.45 * Math.sin(x * 0.026 + z * 0.016);
+    }
+}
 
-            // 4. Forces Engine (Acceleration & Braking)
-            let forwardForce = 0;
+function terrainColor(x, z, h) {
+    const zt = Math.max(0, Math.min(1, z / 1100));
+    const n  = (Math.sin(x * 0.32 + z * 0.21) + 1) * 0.5;
 
-            if (state.throttleInput > 0) {
-                // Accelerating forward
-                forwardForce += state.throttleInput * PHYSICS.accelPower;
-            } else if (state.throttleInput < 0) {
-                if (forwardVelLength > 0.5) {
-                    // Moving forward but pressing backward = Braking
-                    forwardForce -= PHYSICS.brakePower;
-                } else {
-                    // Stationary or already rolling backward = Reverse Engine
-                    forwardForce += state.throttleInput * Math.abs(PHYSICS.accelPower * 0.5);
-                }
-            }
+    if (zt < 0.27) {
+        if (h > 64) return [0.93, 0.93, 0.97];          // Snow
+        if (h > 44) return [0.73 + n*0.04, 0.68 + n*0.03, 0.62];  // Rocky snow-line
+        if (h > 22) return [0.50 + n*0.06, 0.46 + n*0.04, 0.40];  // Rock
+        if (h > 8)  return [0.38, 0.36, 0.29];          // Lower scree
+        return         [0.30 + n*0.07, 0.35 + n*0.05, 0.27]; // Alpine scrub (road edge)
 
-            // Apply forward force to local forward speed
-            let newForwardVelLength = forwardVelLength + forwardForce * dt;
+    } else if (zt < 0.56) {
+        return [0.13 + n*0.05, 0.28 + n*0.10, 0.08 + n*0.04];   // Forest floor greens
 
-            // Cap reverse speed
-            if(newForwardVelLength < PHYSICS.maxReverseSpeed) newForwardVelLength = PHYSICS.maxReverseSpeed;
+    } else {
+        const pz = (zt - 0.56) / 0.44;
+        return [
+            0.74 + n*0.17 - pz*0.07,
+            0.58 + n*0.07 - pz*0.10,
+            0.11 + n*0.04
+        ];   // Golden prairie grass
+    }
+}
 
-            // 5. Drag Forces (Air resistance & Friction)
-            const totalSpeed = Math.abs(newForwardVelLength);
-            const dragFriction = (newForwardVelLength * PHYSICS.dragLinear) + (newForwardVelLength * totalSpeed * PHYSICS.dragQuadratic);
-            newForwardVelLength -= dragFriction * dt;
+(function buildTerrain() {
+    const W = 700, D = 1420, SX = 64, SZ = 128;
+    const geo = new THREE.PlaneGeometry(W, D, SX, SZ);
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, 0, 550);   // Shift: z range  −160 → +1260
 
-            // 6. Grip & Lateral Drift Mechanics
-            // Tires resist sliding sideways. This simulates that friction curve.
-            let newLateralVelLength = lateralVelLength;
-            const slipFactor = Math.abs(lateralVelLength);
-            
-            // Apply drift lateral dampening
-            newLateralVelLength -= lateralVelLength * PHYSICS.driftGrip * dt;
+    const pos  = geo.attributes.position;
+    const cols = new Float32Array(pos.count * 3);
 
-            // 7. Reassemble World Velocity from modified local components
-            state.velocity.copy(forwardVec).multiplyScalar(newForwardVelLength);
-            state.velocity.addScaledVector(rightVec, newLateralVelLength);
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        const h = terrainHeight(x, z);
+        pos.setY(i, h);
+        const [r, g, b] = terrainColor(x, z, h);
+        cols[i*3] = r;  cols[i*3+1] = g;  cols[i*3+2] = b;
+    }
 
-            // 8. Apply translation to position
-            carRoot.position.addScaledVector(state.velocity, dt);
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    geo.computeVertexNormals();
 
-            // 9. JUICE: Visual Suspension Weight Transfer (Roll & Pitch)
-            // Calculate pseudo G-Forces based on lateral slide and engine inputs
-            const targetRoll = -newLateralVelLength * PHYSICS.weightTransfer;
-            const targetPitch = (forwardForce * PHYSICS.weightTransfer * 0.2) - (dragFriction * PHYSICS.weightTransfer * 0.05);
+    const mesh = new THREE.Mesh(geo,
+        new THREE.MeshLambertMaterial({ vertexColors: true }));
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+})();
 
-            // Interpolate mesh rotation inside root for a rubbery weight feel
-            carMesh.rotation.z += (targetRoll - carMesh.rotation.z) * 10 * dt;
-            carMesh.rotation.x += (targetPitch - carMesh.rotation.x) * 10 * dt;
+// ════════════════════════════════════════════════════════════════════
+//  TRACK SPLINE & ROAD RIBBON
+//  Road is a custom BufferGeometry ribbon following a CatmullRomCurve3.
+//  Track goes:  z ≈ 0 → 1060
+//    Mountain section:  tight S-curves (z 0–280)
+//    Forest section:    sweeping bends (z 280–620)
+//    Prairie section:   near-straight long run (z 620–1060)
+// ════════════════════════════════════════════════════════════════════
 
+const TRACK_PTS = [
+    new THREE.Vector3(  0,  0.05,  -80),   // entry ramp
+    new THREE.Vector3(  0,  0.05,    0),   // Mountain zone start
+    new THREE.Vector3(-40,  0.05,   72),   // S-curve L
+    new THREE.Vector3( 40,  0.05,  154),   // S-curve R  (tunnel here)
+    new THREE.Vector3(-26,  0.05,  234),   // S-curve L
+    new THREE.Vector3( 14,  0.05,  298),   // Mountain exit
+    new THREE.Vector3( 46,  0.05,  374),   // Forest entry
+    new THREE.Vector3(-36,  0.05,  448),   // Forest sweep L
+    new THREE.Vector3( 26,  0.05,  524),   // Forest sweep R
+    new THREE.Vector3( -8,  0.05,  596),   // Forest exit / trestle area
+    new THREE.Vector3(  0,  0.05,  660),   // Prairie entry
+    new THREE.Vector3(  5,  0.05,  760),   // Prairie — slight drift
+    new THREE.Vector3( -5,  0.05,  860),
+    new THREE.Vector3(  0,  0.05,  960),
+    new THREE.Vector3(  0,  0.05, 1060),   // Prairie end
+    new THREE.Vector3(  0,  0.05, 1200),   // Off-screen
+];
 
-            // --- CHASE CAMERA LOGIC ---
-            // Define camera anchor point behind and above the car based on heading
-            const camOffset = new THREE.Vector3()
-                .copy(forwardVec)
-                .multiplyScalar(-14) // Distance behind
-                .add(new THREE.Vector3(0, 6, 0)); // Height
+const trackCurve = new THREE.CatmullRomCurve3(TRACK_PTS, false, 'catmullrom', 0.5);
 
-            const targetCamPos = carRoot.position.clone().add(camOffset);
-            
-            // Smoothly lerp camera position to eliminate rigid pinning
-            camera.position.lerp(targetCamPos, 8 * dt);
-            
-            // Aim camera slightly ahead of the car model
-            const lookTarget = carRoot.position.clone().add(forwardVec.clone().multiplyScalar(4));
-            camera.lookAt(lookTarget);
+/** Builds a ribbon BufferGeometry along a CatmullRomCurve3 */
+function buildRibbon(curve, segments, width) {
+    const pts   = curve.getPoints(segments);
+    const verts = [], norms = [], uvs = [], idx = [];
+    const up    = new THREE.Vector3(0, 1, 0);
 
+    for (let i = 0; i <= segments; i++) {
+        const pt  = pts[i];
+        const t   = i / segments;
+        const dir = (i < segments)
+            ? new THREE.Vector3().subVectors(pts[i+1], pts[i])
+            : new THREE.Vector3().subVectors(pts[i], pts[i-1]);
+        dir.y = 0;
+        dir.normalize();
 
-            // --- DIAGNOSTICS UI UPDATE ---
-            const displayedSpeed = Math.abs(newForwardVelLength) * 3.6; // Convert units to arbitrary 'km/h'
-            document.getElementById('ui-speed').innerText = displayedSpeed.toFixed(1);
-            document.getElementById('ui-slip').innerText = slipFactor.toFixed(2);
-            document.getElementById('ui-gforce').innerText = (Math.abs(newLateralVelLength * 0.1)).toFixed(2);
+        const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+        const hw    = width * 0.5;
 
-            renderer.render(scene, camera);
+        verts.push(
+            pt.x - right.x*hw, pt.y, pt.z - right.z*hw,
+            pt.x + right.x*hw, pt.y, pt.z + right.z*hw
+        );
+        norms.push(0,1,0,  0,1,0);
+        uvs.push(0, t*50,  1, t*50);
+
+        if (i < segments) {
+            const b = i * 2;
+            idx.push(b, b+2, b+1,   b+1, b+2, b+3);
         }
+    }
 
-        // --- WINDOW RESIZE ENGINE ---
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setAttribute('normal',   new THREE.Float32BufferAttribute(norms, 3));
+    geo.setAttribute('uv',       new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return geo;
+}
+
+// Asphalt road surface
+const roadMesh = new THREE.Mesh(
+    buildRibbon(trackCurve, 320, 13.8),
+    new THREE.MeshLambertMaterial({ color: 0x1a1a1a })
+);
+roadMesh.receiveShadow = true;
+scene.add(roadMesh);
+
+// White edge-line ribbons
+(function buildEdgeLines() {
+    const pts    = trackCurve.getPoints(320);
+    const SEG    = 320;
+    const ROAD_W = 13.8;
+    const EW     = 0.50;   // edge line width
+    const up     = new THREE.Vector3(0, 1, 0);
+    const verts  = [], norms = [], idx = [];
+
+    for (let i = 0; i <= SEG; i++) {
+        const pt  = pts[i];
+        const dir = (i < SEG)
+            ? new THREE.Vector3().subVectors(pts[i+1], pts[i])
+            : new THREE.Vector3().subVectors(pts[i], pts[i-1]);
+        dir.y = 0; dir.normalize();
+        const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+        const Y = pt.y + 0.025;
+
+        // Left edge strip (outer, inner)
+        const loX = pt.x - right.x * (ROAD_W/2 + EW),  loZ = pt.z - right.z * (ROAD_W/2 + EW);
+        const liX = pt.x - right.x * (ROAD_W/2),        liZ = pt.z - right.z * (ROAD_W/2);
+        // Right edge strip (inner, outer)
+        const riX = pt.x + right.x * (ROAD_W/2),        riZ = pt.z + right.z * (ROAD_W/2);
+        const roX = pt.x + right.x * (ROAD_W/2 + EW),   roZ = pt.z + right.z * (ROAD_W/2 + EW);
+
+        verts.push(loX, Y, loZ,  liX, Y, liZ,  riX, Y, riZ,  roX, Y, roZ);
+        norms.push(0,1,0, 0,1,0, 0,1,0, 0,1,0);
+
+        if (i < SEG) {
+            const b = i * 4;
+            idx.push(b,   b+4, b+1,  b+1, b+4, b+5);   // left edge
+            idx.push(b+2, b+6, b+3,  b+3, b+6, b+7);   // right edge
+        }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setAttribute('normal',   new THREE.Float32BufferAttribute(norms, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0xeeeeee })));
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  CPR RAILWAY — parallel track at x = −60
+//  Steel rails + wooden ties, runs the full length of the map.
+// ════════════════════════════════════════════════════════════════════
+
+const RAIL_X      = -60;
+const RAIL_Z_S    = -130;
+const RAIL_Z_E    = 1280;
+const RAIL_LEN    = RAIL_Z_E - RAIL_Z_S;
+const RAIL_CENTER = (RAIL_Z_S + RAIL_Z_E) / 2;
+
+(function buildRailway() {
+    const railMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+    const tieMat  = new THREE.MeshLambertMaterial({ color: 0x4e2d12 });
+
+    // Two steel rails
+    const railGeo = new THREE.BoxGeometry(0.13, 0.13, RAIL_LEN);
+    [-0.74, 0.74].forEach(ox => {
+        const r = new THREE.Mesh(railGeo, railMat);
+        r.position.set(RAIL_X + ox, 0.065, RAIL_CENTER);
+        r.receiveShadow = true;
+        scene.add(r);
+    });
+
+    // Wooden ties — instanced for performance
+    const TIE_SP = 2.2;
+    const N      = Math.floor(RAIL_LEN / TIE_SP);
+    const tieGeo = new THREE.BoxGeometry(2.1, 0.09, 0.40);
+    const ties   = new THREE.InstancedMesh(tieGeo, tieMat, N);
+    const D      = new THREE.Object3D();
+    for (let i = 0; i < N; i++) {
+        D.position.set(RAIL_X, 0.045, RAIL_Z_S + i * TIE_SP);
+        D.updateMatrix();
+        ties.setMatrixAt(i, D.matrix);
+    }
+    ties.receiveShadow = true;
+    scene.add(ties);
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  BACKGROUND MOUNTAINS — cone meshes, flatShading for chiselled look
+//  Placed behind & beside the mountain zone (z −80 to 360, x ±120–370)
+// ════════════════════════════════════════════════════════════════════
+
+(function buildMountains() {
+    const rockMat = new THREE.MeshLambertMaterial({ color: 0x686055, flatShading: true });
+    const snowMat = new THREE.MeshLambertMaterial({ color: 0xededf4, flatShading: true });
+
+    // [x, z, radius, height]
+    const peaks = [
+        [-195,  -40, 105, 195],  [ 215,  -20,  90, 168],
+        [-270,   55, 120, 225],  [ 275,   80,  95, 178],
+        [-165,  155,  80, 152],  [ 198,  175,  88, 162],
+        [-320,  -15, 140, 248],  [ 345,  130, 108, 195],
+        [-130,  260,  70, 132],  [ 225,  270,  74, 142],
+        [-255,  310,  90, 170],  [ 168,  320,  78, 148],
+        [-100,  -55,  65, 118],  [ 145,  -35,  72, 128],
+        [-340,  220, 115, 210],  [ 360,   50, 100, 185],
+    ];
+
+    peaks.forEach(([px, pz, r, h]) => {
+        const rock = new THREE.Mesh(new THREE.ConeGeometry(r, h, 8, 1), rockMat);
+        rock.position.set(px, h * 0.5 - 4, pz);
+        scene.add(rock);
+
+        const snow = new THREE.Mesh(new THREE.ConeGeometry(r * 0.36, h * 0.32, 8, 1), snowMat);
+        snow.position.set(px, h * 0.86 - 4, pz);
+        scene.add(snow);
+    });
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  PINE FOREST — instanced meshes for trunks + two cone tiers
+//  Placed in forest zone (z 285–640) off to both sides of the road.
+//  Three InstancedMesh objects = 3 draw calls for 560 trees.
+// ════════════════════════════════════════════════════════════════════
+
+(function buildForest() {
+    const COUNT    = 560;
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a2e12 });
+    const cone1Mat = new THREE.MeshLambertMaterial({ color: 0x1d4a22 });
+    const cone2Mat = new THREE.MeshLambertMaterial({ color: 0x275e2c });
+
+    // Geometry for trunk, lower cone, upper cone
+    const tGeo  = new THREE.CylinderGeometry(0.27, 0.44, 3.4, 7);
+    const c1Geo = new THREE.ConeGeometry(2.9, 5.6, 8);
+    const c2Geo = new THREE.ConeGeometry(1.9, 5.2, 7);
+
+    const tM  = new THREE.InstancedMesh(tGeo,  trunkMat, COUNT);
+    const c1M = new THREE.InstancedMesh(c1Geo, cone1Mat, COUNT);
+    const c2M = new THREE.InstancedMesh(c2Geo, cone2Mat, COUNT);
+
+    const D = new THREE.Object3D();
+
+    // Deterministic placement using sine-hash
+    function rnd(s) { return (Math.sin(s * 127.1 + 311.7) * 0.5 + 0.5); }
+
+    let placed = 0;
+    for (let i = 0; placed < COUNT && i < COUNT * 6; i++) {
+        const zi   = rnd(i * 5 + 0);
+        const xi   = rnd(i * 5 + 1);
+        const sc   = rnd(i * 5 + 2);
+        const side = rnd(i * 5 + 3) > 0.50 ? 1 : -1;
+        const ry   = rnd(i * 5 + 4) * Math.PI * 2;
+
+        const z = 284 + zi * 356;          // Forest z-range 284–640
+        const x = side * (20 + xi * 115);  // Off road  ±20 → ±135
+
+        // Skip if too close to the railway  
+        if (Math.abs(x - RAIL_X) < 5) continue;
+
+        const s = 0.65 + sc * 0.72;
+
+        D.rotation.y = ry;
+
+        // Trunk
+        D.position.set(x, 1.7 * s, z);
+        D.scale.set(s, s, s);
+        D.updateMatrix();
+        tM.setMatrixAt(placed, D.matrix);
+
+        // Lower cone
+        D.position.set(x, (3.4 + 2.8) * s, z);
+        D.scale.set(s, s, s);
+        D.updateMatrix();
+        c1M.setMatrixAt(placed, D.matrix);
+
+        // Upper cone
+        D.position.set(x, (3.4 + 5.6 + 2.6) * s, z);
+        D.scale.set(s * 0.66, s * 0.88, s * 0.66);
+        D.updateMatrix();
+        c2M.setMatrixAt(placed, D.matrix);
+
+        placed++;
+    }
+
+    tM.count = c1M.count = c2M.count = placed;
+    [tM, c1M, c2M].forEach(m => { m.castShadow = true; scene.add(m); });
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  TRESTLE BRIDGE — alongside railway at z ≈ 580
+//  Wooden trestle structure, ~12 m tall. Steam train passes over it.
+// ════════════════════════════════════════════════════════════════════
+
+(function buildBridge() {
+    const BRDG_Z = 578;
+    const wood   = new THREE.MeshLambertMaterial({ color: 0x5a3a1a });
+    const rail   = new THREE.MeshLambertMaterial({ color: 0x7a5530 });
+    const g      = new THREE.Group();
+    g.position.set(RAIL_X, 0, BRDG_Z);
+
+    // Platform
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.38, 42), wood);
+    plat.position.y = 12.2;
+    g.add(plat);
+
+    // Support bents every 6 units
+    const ZZ = [-18, -12, -6, 0, 6, 12, 18];
+    ZZ.forEach(dz => {
+        [-0.95, 0.95].forEach(dx => {
+            const post = new THREE.Mesh(new THREE.BoxGeometry(0.32, 12.1, 0.32), wood);
+            post.position.set(dx, 6.05, dz);
+            g.add(post);
         });
+        const hb = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.22, 0.22), wood);
+        hb.position.set(0, 8.2, dz);
+        g.add(hb);
+    });
 
-        // Fire loop
-        animate();
-    </script>
+    // X-braces between bents
+    for (let i = 0; i < ZZ.length - 1; i++) {
+        const za = ZZ[i], zb = ZZ[i+1];
+        const mz = (za + zb) / 2, dLen = Math.hypot(6, 12);
+        const ang = Math.atan2(12, 6);
+        [-0.95, 0.95].forEach(dx => {
+            const d1 = new THREE.Mesh(new THREE.BoxGeometry(0.18, dLen, 0.18), wood);
+            d1.position.set(dx, 6, mz);
+            d1.rotation.x = ang;
+            g.add(d1);
+            const d2 = new THREE.Mesh(new THREE.BoxGeometry(0.18, dLen, 0.18), wood);
+            d2.position.set(dx, 6, mz);
+            d2.rotation.x = -ang;
+            g.add(d2);
+        });
+    }
+
+    // Side hand-rails
+    [-1.1, 1.1].forEach(dx => {
+        const hr = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.10, 42), rail);
+        hr.position.set(dx, 12.65, 0);
+        g.add(hr);
+    });
+
+    // Longitudinal sill beams
+    [-0.95, 0.95].forEach(dx => {
+        const sb = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 42), wood);
+        sb.position.set(dx, 0.4, 0);
+        g.add(sb);
+    });
+
+    g.castShadow = true;
+    scene.add(g);
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  TUNNEL ENTRANCE — stone arch spanning road at z ≈ 155 (S-curve 2)
+//  Orientation computed from track tangent at that point.
+// ════════════════════════════════════════════════════════════════════
+
+(function buildTunnel() {
+    // Sample track to find point closest to z=154
+    let bestT = 0, bestDist = Infinity;
+    for (let i = 0; i <= 600; i++) {
+        const t  = i / 600;
+        const pt = trackCurve.getPointAt(t);
+        const d  = Math.abs(pt.z - 154);
+        if (d < bestDist) { bestDist = d; bestT = t; }
+    }
+    const pt   = trackCurve.getPointAt(bestT);
+    const tang = trackCurve.getTangentAt(bestT);
+    const hdg  = Math.atan2(tang.x, tang.z);
+
+    const stone = new THREE.MeshLambertMaterial({ color: 0x3d3830, flatShading: true });
+    const dark  = new THREE.MeshLambertMaterial({ color: 0x080808 });
+    const g     = new THREE.Group();
+    g.position.set(pt.x, 0, pt.z);
+    g.rotation.y = hdg;
+
+    // Left pillar
+    const pilGeo = new THREE.BoxGeometry(3.6, 12, 2.8);
+    [-9, 9].forEach(px => {
+        const pil = new THREE.Mesh(pilGeo, stone);
+        pil.position.set(px, 6, 0);
+        g.add(pil);
+    });
+
+    // Arch cap
+    const capGeo = new THREE.BoxGeometry(22, 3.8, 2.8);
+    const cap    = new THREE.Mesh(capGeo, stone);
+    cap.position.set(0, 13.1, 0);
+    g.add(cap);
+
+    // Dark opening cutout (visual only)
+    const opGeo = new THREE.BoxGeometry(14.5, 10.5, 3.5);
+    const op    = new THREE.Mesh(opGeo, dark);
+    op.position.set(0, 5.5, 0);
+    g.add(op);
+
+    // Moss / detail — tiny offset box overlay
+    const detGeo = new THREE.BoxGeometry(22.2, 0.3, 2.9);
+    const det    = new THREE.Mesh(detGeo, new THREE.MeshLambertMaterial({ color: 0x2a3828 }));
+    det.position.set(0, 9.2, 0);
+    g.add(det);
+
+    scene.add(g);
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  STEAM TRAIN — animated, moves from prairie toward mountains (−z dir)
+//  Built with chimney toward local +z so rotation.y = Math.PI faces it −z.
+//  It starts at z = 1150, resets to 1150 when it passes z = −130.
+// ════════════════════════════════════════════════════════════════════
+
+const steamTrain = new THREE.Group();
+let   trainZ     = 1150;
+const TRAIN_SPD  = 24;   // units / sec  ≈ 86 km/h at this scale
+
+(function buildTrain() {
+    const body   = new THREE.MeshLambertMaterial({ color: 0x181410 });
+    const boiler = new THREE.MeshLambertMaterial({ color: 0x232018 });
+    const red    = new THREE.MeshLambertMaterial({ color: 0xcc3300 });
+    const brass  = new THREE.MeshLambertMaterial({ color: 0xcc9820 });
+    const smk    = new THREE.MeshLambertMaterial({ color: 0x1e1c1a });
+    const whl    = new THREE.MeshLambertMaterial({ color: 0x111111 });
+    const rim    = new THREE.MeshLambertMaterial({ color: 0xb8b8b8 });
+    const win    = new THREE.MeshLambertMaterial({ color: 0x334455 });
+    const lite   = new THREE.MeshLambertMaterial({ color: 0xfffff0 });
+
+    const add = (geo, mat, px, py, pz, rx=0, ry=0, rz=0) => {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(px, py, pz);
+        m.rotation.set(rx, ry, rz);
+        m.castShadow = true;
+        steamTrain.add(m);
+        return m;
+    };
+
+    // Body slab
+    add(new THREE.BoxGeometry(2.9, 2.5, 14.5),  body,   0, 1.25,  0);
+
+    // Boiler drum
+    const bGeo = new THREE.CylinderGeometry(1.38, 1.38, 10.5, 14);
+    bGeo.rotateX(Math.PI / 2);
+    add(bGeo, boiler,  0, 2.2, -1.2);
+
+    // Red accent band
+    const bandGeo = new THREE.CylinderGeometry(1.41, 1.41, 0.42, 14);
+    bandGeo.rotateX(Math.PI / 2);
+    add(bandGeo, red,  0, 2.2, -4.5);
+
+    // Cab (back = local −z)
+    add(new THREE.BoxGeometry(3.3, 3.8, 4.2),  body,  0, 1.9, -5.5);
+
+    // Cab windows
+    [-1.0, 1.0].forEach(sx => {
+        add(new THREE.BoxGeometry(0.75, 1.2, 0.1), win,  sx*1.22, 2.8, -7.55);
+    });
+
+    // Chimney (front = local +z)
+    add(new THREE.CylinderGeometry(0.36, 0.44, 2.4, 10), smk,  0, 4.1,  5.8);
+
+    // Sand dome
+    add(new THREE.SphereGeometry(0.56, 10, 8), brass,  0, 3.66, -1.2);
+
+    // Steam dome
+    add(new THREE.CylinderGeometry(0.5, 0.5, 1.0, 10), brass,  0, 3.66,  1.8);
+
+    // Cowcatcher (front)
+    add(new THREE.BoxGeometry(3.3, 0.15, 2.2), red,  0, 0.62,  8.4, 0.30, 0, 0);
+
+    // Headlight
+    add(new THREE.BoxGeometry(0.7, 0.7, 0.5), lite,  0, 2.7,  7.6);
+
+    // Drive wheels  (3 pairs, local +z side = front)
+    const dWGeo = new THREE.CylinderGeometry(0.60, 0.60, 0.32, 12);
+    dWGeo.rotateZ(Math.PI / 2);
+    [2.8, 0.1, -2.6].forEach(wz => {
+        [-1.68, 1.68].forEach(wx => {
+            const w = new THREE.Mesh(dWGeo, whl); w.position.set(wx, 0.60, wz); w.castShadow=true; steamTrain.add(w);
+            const r = new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.34,0.34,10), rim); r.position.set(wx,0.60,wz); r.rotation.z=Math.PI/2; steamTrain.add(r);
+        });
+    });
+
+    // Pilot wheels (smaller, front)
+    const pWGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.26, 10);
+    pWGeo.rotateZ(Math.PI / 2);
+    [7.2, 5.6].forEach(wz => {
+        [-1.55, 1.55].forEach(wx => {
+            const w = new THREE.Mesh(pWGeo, whl); w.position.set(wx, 0.38, wz); steamTrain.add(w);
+        });
+    });
+
+    // Position on railway, facing −z direction
+    steamTrain.position.set(RAIL_X, 0.65, trainZ);
+    steamTrain.rotation.y = Math.PI;   // Chimney at local+z → faces world −z  ✓
+
+    scene.add(steamTrain);
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  TELEGRAPH POLES — instanced along railway, z 0 → 1100
+// ════════════════════════════════════════════════════════════════════
+
+(function buildPoles() {
+    const POLE_SP = 82;
+    const POLE_H  = 8.2;
+    const POLE_X  = RAIL_X - 5.5;
+    const ZS      = 0, ZE = 1100;
+    const N       = Math.floor((ZE - ZS) / POLE_SP) + 1;
+
+    const poleMat = new THREE.MeshLambertMaterial({ color: 0x4a3118 });
+    const insMat  = new THREE.MeshLambertMaterial({ color: 0x8e5544 });
+    const wireMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
+
+    const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.17, POLE_H, 6), poleMat, N);
+    const arms  = new THREE.InstancedMesh(new THREE.BoxGeometry(3.6, 0.14, 0.14), poleMat, N);
+    const ins   = new THREE.InstancedMesh(new THREE.SphereGeometry(0.18, 6, 5), insMat, N * 2);
+
+    const D = new THREE.Object3D();
+    for (let i = 0; i < N; i++) {
+        const z = ZS + i * POLE_SP;
+        D.position.set(POLE_X, POLE_H/2, z); D.scale.set(1,1,1); D.updateMatrix();
+        poles.setMatrixAt(i, D.matrix);
+        D.position.set(POLE_X, POLE_H-0.45, z); D.updateMatrix();
+        arms.setMatrixAt(i, D.matrix);
+        [-1.55, 1.55].forEach((ox, j) => {
+            D.position.set(POLE_X+ox, POLE_H-0.28, z); D.scale.set(1,1,1); D.updateMatrix();
+            ins.setMatrixAt(i*2+j, D.matrix);
+        });
+    }
+
+    [poles, arms, ins].forEach(m => scene.add(m));
+
+    // Continuous wire lines  (just two thin boxes)
+    const WL = ZE - ZS;
+    const WC = (ZS + ZE) / 2;
+    [-1.55, 1.55].forEach(ox => {
+        const w = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, WL), wireMat);
+        w.position.set(POLE_X + ox, POLE_H - 0.28, WC);
+        scene.add(w);
+    });
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  CARGO CRATES — scattered near mountain rail-yard (z 30–115)
+// ════════════════════════════════════════════════════════════════════
+
+(function buildCrates() {
+    const c1 = new THREE.MeshLambertMaterial({ color: 0x7a5c2e });
+    const c2 = new THREE.MeshLambertMaterial({ color: 0x5a7030 });
+    const c3 = new THREE.MeshLambertMaterial({ color: 0x6a4428 });
+
+    const data = [
+        [ 17, 0, 36, 1.05, 0.05, c1],  [ 19, 1, 36, 0.82, 0.12, c2],  [ 23, 0, 43, 1.20,-0.06, c3],
+        [-62, 0, 52, 1.00, 0.15, c2],  [-64, 0, 57, 0.92,-0.10, c1],  [-62, 1, 53, 0.80, 0.00, c3],
+        [ 46, 0, 88, 1.10, 0.08, c1],  [ 49, 0, 93, 1.00,-0.05, c2],  [ 49, 1, 92, 0.75, 0.13, c3],
+        [-63, 0, 102,1.20, 0.00, c1],  [-66, 0, 107,1.00, 0.20, c2],  [-68, 1, 105,0.85,-0.10, c3],
+    ];
+
+    data.forEach(([x, stack, z, sc, rot, mat]) => {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(sc*1.7, sc*1.7, sc*1.7), mat);
+        mesh.position.set(x, sc*0.85 + stack*sc*1.7, z);
+        mesh.rotation.y = rot;
+        mesh.castShadow = true;
+        scene.add(mesh);
+    });
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  PLAYER CAR — improved visual, same arcade physics
+//  Red racing car with roof, windows, wheels.
+//  carRoot  →  carMesh group (tilts for weight transfer)
+//  Heading=0 means forward = +z (into mountain zone)
+// ════════════════════════════════════════════════════════════════════
+
+const carRoot = new THREE.Group();
+carRoot.position.set(0, 0, -25);
+scene.add(carRoot);
+
+const carMesh = new THREE.Group();
+carRoot.add(carMesh);
+
+(function buildCar() {
+    const bdy  = new THREE.MeshLambertMaterial({ color: 0xcc2020 });  // Red
+    const drk  = new THREE.MeshLambertMaterial({ color: 0x141414 });  // Near-black
+    const gls  = new THREE.MeshLambertMaterial({ color: 0x223344, transparent: true, opacity: 0.60 });
+    const tire = new THREE.MeshLambertMaterial({ color: 0x0e0e0e });
+    const rimM = new THREE.MeshLambertMaterial({ color: 0xc0c0c0 });
+    const hlM  = new THREE.MeshLambertMaterial({ color: 0xffffd8 });
+    const rlM  = new THREE.MeshLambertMaterial({ color: 0xff2200 });
+
+    const add = (geo, mat, px, py, pz, rx=0, ry=0, rz=0, cast=true) => {
+        const m = new THREE.Mesh(geo, mat);
+        m.position.set(px, py, pz);
+        m.rotation.set(rx, ry, rz);
+        if (cast) m.castShadow = true;
+        carMesh.add(m);
+    };
+
+    // Body
+    add(new THREE.BoxGeometry(2.35, 0.88, 4.65),  bdy,  0, 0.86,  0);
+    // Roof (narrower, over rear half)
+    add(new THREE.BoxGeometry(1.95, 0.68, 2.60),  drk,  0, 1.62,  0.26);
+    // Windscreen
+    add(new THREE.BoxGeometry(1.78, 0.58, 0.12),  gls,  0, 1.64, -1.08, 0.22);
+    // Rear window
+    add(new THREE.BoxGeometry(1.62, 0.52, 0.10),  gls,  0, 1.62,  1.48,-0.18);
+    // Side windows
+    [-0.99, 0.99].forEach(sx =>
+        add(new THREE.BoxGeometry(0.10, 0.48, 1.82), gls, sx, 1.62, 0.24));
+    // Nose strip
+    add(new THREE.BoxGeometry(2.05, 0.30, 0.58),  drk,  0, 0.68, -2.44);
+    // Headlights
+    [-0.74, 0.74].forEach(sx =>
+        add(new THREE.BoxGeometry(0.56, 0.22, 0.14), hlM, sx, 0.92, -2.50));
+    // Tail lights
+    [-0.72, 0.72].forEach(sx =>
+        add(new THREE.BoxGeometry(0.65, 0.22, 0.12), rlM, sx, 0.92,  2.42));
+    // Side skirts
+    [-1.20, 1.20].forEach(sx =>
+        add(new THREE.BoxGeometry(0.11, 0.30, 4.30), drk, sx, 0.50,  0));
+    // Rear spoiler
+    add(new THREE.BoxGeometry(2.20, 0.50, 0.20),  drk,  0, 1.80,  2.45);
+
+    // Wheels — 4 per side
+    const wGeo = new THREE.CylinderGeometry(0.44, 0.44, 0.34, 12);
+    wGeo.rotateZ(Math.PI / 2);
+    const rGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.36, 10);
+    rGeo.rotateZ(Math.PI / 2);
+
+    [[-1.24, 0.44, -1.58], [ 1.24, 0.44, -1.58],
+     [-1.24, 0.44,  1.58], [ 1.24, 0.44,  1.58]].forEach(([wx, wy, wz]) => {
+        add(new THREE.CylinderGeometry(0.44,0.44,0.34,12), tire, wx, wy, wz, 0, 0, Math.PI/2);
+        add(new THREE.CylinderGeometry(0.26,0.26,0.36,10), rimM, wx, wy, wz, 0, 0, Math.PI/2, false);
+    });
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  PHYSICS STATE & INPUT
+// ════════════════════════════════════════════════════════════════════
+
+const state = {
+    velocity:      new THREE.Vector3(),
+    heading:       0,
+    steerInput:    0,
+    throttleInput: 0,
+};
+
+const keys = {};
+window.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))
+        e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function processInput() {
+    state.throttleInput =
+        (keys['w'] || keys['ArrowUp'])    ?  1.0 :
+        (keys['s'] || keys['ArrowDown'])  ? -0.5 : 0;
+    state.steerInput =
+        (keys['a'] || keys['ArrowLeft'])  ?  1.0 :
+        (keys['d'] || keys['ArrowRight']) ? -1.0 : 0;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ZONE SYSTEM — fog, hemisphere colour, and UI all blend per zone
+// ════════════════════════════════════════════════════════════════════
+
+const ZONES = [
+    { name: 'Rocky Mountains', fogCol: new THREE.Color(0x8aafc4), fogD: 0.0040,
+      skyCol: new THREE.Color(0x88c0df), grndCol: new THREE.Color(0x70501e) },
+    { name: 'Pine Forest',     fogCol: new THREE.Color(0x6a8870), fogD: 0.0028,
+      skyCol: new THREE.Color(0x7abcaf), grndCol: new THREE.Color(0x4a5a1e) },
+    { name: 'Open Prairie',    fogCol: new THREE.Color(0xc4a458), fogD: 0.0015,
+      skyCol: new THREE.Color(0xd0a060), grndCol: new THREE.Color(0x806020) },
+];
+let currentZoneIdx = 0;
+
+function zoneIndex(z) {
+    const zt = Math.max(0, Math.min(1, z / 1100));
+    return zt < 0.27 ? 0 : zt < 0.56 ? 1 : 2;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ANIMATE LOOP
+// ════════════════════════════════════════════════════════════════════
+
+const tmpCol = new THREE.Color();
+
+function animate() {
+    requestAnimationFrame(animate);
+    const dt = Math.min(clock.getDelta(), 0.1);
+
+    // ── Input ──────────────────────────────────────────────────────
+    processInput();
+
+    // ── Physics ────────────────────────────────────────────────────
+    const fwd   = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+    const right = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
+
+    const fwdVel = state.velocity.dot(fwd);
+    const latVel = state.velocity.dot(right);
+
+    // Steering
+    const sRatio = Math.abs(fwdVel) / 40.0;
+    const sFact  = Math.min(1.0, sRatio * 3.0) * (1.0 - sRatio * 0.3);
+    const turnD  = fwdVel >= 0 ? 1 : -1;
+    state.heading      += state.steerInput * PHYSICS.steerSpeed * sFact * turnD * dt;
+    carRoot.rotation.y  = state.heading;
+
+    // Drive force
+    let fForce = 0;
+    if (state.throttleInput > 0) {
+        fForce = state.throttleInput * PHYSICS.accelPower;
+    } else if (state.throttleInput < 0) {
+        fForce = fwdVel > 0.5
+            ? -PHYSICS.brakePower
+            : state.throttleInput * PHYSICS.accelPower * 0.5;
+    }
+
+    let newFwd = fwdVel + fForce * dt;
+    if (newFwd < PHYSICS.maxReverseSpeed) newFwd = PHYSICS.maxReverseSpeed;
+
+    const spd  = Math.abs(newFwd);
+    const drag = (newFwd * PHYSICS.dragLinear) + (newFwd * spd * PHYSICS.dragQuadratic);
+    newFwd    -= drag * dt;
+
+    let newLat = latVel;
+    newLat    -= latVel * PHYSICS.driftGrip * dt;
+
+    state.velocity.copy(fwd).multiplyScalar(newFwd);
+    state.velocity.addScaledVector(right, newLat);
+    carRoot.position.addScaledVector(state.velocity, dt);
+
+    // Weight-transfer tilt
+    const tRoll  = -newLat  * PHYSICS.weightTransfer;
+    const tPitch = (fForce  * PHYSICS.weightTransfer * 0.18) - (drag * PHYSICS.weightTransfer * 0.05);
+    carMesh.rotation.z += (tRoll  - carMesh.rotation.z) * 10 * dt;
+    carMesh.rotation.x += (tPitch - carMesh.rotation.x) * 10 * dt;
+
+    // ── Steam train ────────────────────────────────────────────────
+    // Train runs from prairie (z=1150) toward mountains (z=−130), then resets.
+    trainZ -= TRAIN_SPD * dt;
+    if (trainZ < -130) trainZ = 1150;
+    steamTrain.position.z = trainZ;
+
+    // ── Zone transition ────────────────────────────────────────────
+    const carZ  = carRoot.position.z;
+    const newZI = zoneIndex(carZ);
+    if (newZI !== currentZoneIdx) {
+        currentZoneIdx = newZI;
+        document.getElementById('zone-name').textContent = ZONES[currentZoneIdx].name;
+    }
+
+    // Smoothly blend fog + hemisphere light toward target zone
+    const Z  = ZONES[currentZoneIdx];
+    const LR = dt * 1.8;    // lerp rate
+    tmpCol.copy(scene.fog.color).lerp(Z.fogCol, LR);
+    scene.fog.color.copy(tmpCol);
+    scene.fog.density += (Z.fogD - scene.fog.density) * LR;
+    hemiLight.color.lerp(Z.skyCol, LR);
+    hemiLight.groundColor.lerp(Z.grndCol, LR);
+    renderer.setClearColor(scene.fog.color);
+
+    // ── Chase camera ───────────────────────────────────────────────
+    const camOff = fwd.clone().multiplyScalar(-14).add(new THREE.Vector3(0, 5.8, 0));
+    camera.position.lerp(carRoot.position.clone().add(camOff), 8 * dt);
+    camera.lookAt(carRoot.position.clone().addScaledVector(fwd, 5));
+
+    // ── HUD ────────────────────────────────────────────────────────
+    document.getElementById('ui-speed').textContent  = (Math.abs(newFwd) * 3.6).toFixed(0);
+    document.getElementById('ui-gforce').textContent = (Math.abs(newLat * 0.1)).toFixed(2);
+    document.getElementById('ui-slip').textContent   = Math.abs(latVel).toFixed(2);
+
+    renderer.render(scene, camera);
+}
+
+// ── Resize ────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Fire!
+animate();
+</script>
 </body>
 </html>
